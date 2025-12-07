@@ -8,7 +8,10 @@ library(googlesheets4)
 library(wordcloud)
 library(RColorBrewer)
 
-# Service account authentication for deployment
+# download udpipe NLP model (only need to do once)
+# udpipe_download_model(language = "english-ewt", model_dir = ".")
+
+# service account authentication for deployment
 gs4_auth(path = "gen-lang-client-0181100734-a34fde113722.json")
 
 # survey questions (in order) ----
