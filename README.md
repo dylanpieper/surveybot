@@ -1,6 +1,6 @@
-# SurveyBot
+# surveybot
 
-SurveyBot demonstrates conversational data collection using [shinychat](https://posit-dev.github.io/shinychat/) and Claude. Expanding on traditional surveys and interviews, users answer questions through natural conversation while the LLM extracts structured data, generates content, and asks adaptive follow-up questions.
+surveybot demonstrates conversational data collection using [shinychat](https://posit-dev.github.io/shinychat/) and Claude. Expanding on traditional surveys and interviews, users answer questions through natural conversation while the LLM extracts structured data, generates content, and asks adaptive follow-up questions.
 
 ## Usage 🍦✨
 
@@ -8,7 +8,7 @@ SurveyBot demonstrates conversational data collection using [shinychat](https://
 shiny::runApp("app.R")
 ```
 
-The demo collects ice cream preferences through a chat interface, storing responses in a SQLite database.
+The demo collects ice cream preferences through a shinychat UI. The files are modularized to make creating your own surveybot easy; no additional package needed.
 
 ## Key Features
 
