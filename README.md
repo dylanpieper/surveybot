@@ -1,6 +1,6 @@
 # SurveyBot
 
-SurveyBot demonstrates conversational data collection using [shinychat](https://posit-dev.github.io/shinychat/) and Claude. Expanding on traditional surveys or interviews, users answer questions through natural conversation while the LLM extracts structured data and generates additional content and adaptive follow-up questions.
+SurveyBot demonstrates conversational data collection using [shinychat](https://posit-dev.github.io/shinychat/) and Claude. Expanding on traditional surveys and interviews, users answer questions through natural conversation while the LLM extracts structured data, generates content, and asks adaptive follow-up questions.
 
 ## Usage 🍦✨
 
