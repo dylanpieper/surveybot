@@ -9,7 +9,7 @@ library(promises)
 # Configuration ----
 config <- list(
   tries = 1,
-  response_delay = 0.3,
+  response_delay = 0,
   character_delay = 0.02,
   version = "1.0",
   db_path = "survey.db",
