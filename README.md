@@ -8,7 +8,7 @@ surveybot demonstrates conversational data collection using [shinychat](https://
 shiny::runApp("app.R")
 ```
 
-The demo collects ice cream preferences through a shinychat UI. The files are modularized to make creating your own surveybot easy; no additional package needed.
+The demo collects ice cream preferences through a shinychat UI. The files are modular to make your own surveybot (package to come).
 
 ## Key Features
 
