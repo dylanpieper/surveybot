@@ -138,10 +138,10 @@ extract_response <- \(chat, user_response, schema) {
 #' Generate content using templates
 #' @param chat Chat object
 #' @param template_config Template configuration with prompt, schema, response_field
-#' @param context_data List of values for template placeholders
+#' @param context_data Named list of values for template placeholders
 #' @return Generated content
 generate_content <- \(chat, template_config, context_data = list()) {
-  prompt <- do.call(sprintf, c(list(template_config$prompt), context_data))
+  prompt <- interpolate(template_config$prompt, context_data)
   result <- chat$clone()$set_turns(list())$chat_structured(prompt, type = template_config$schema)
   result[[template_config$response_field]]
 }
@@ -178,20 +178,65 @@ generate_adaptive_question_async <- \(chat, responses, context_template, prompt)
 
 # Utility Functions ----
 
+#' String interpolation with named placeholders
+#' @param template String with {variable} placeholders
+#' @param data Named list or environment with variable values
+#' @param fallback_value Value to use for missing variables (default: variable name)
+#' @return Interpolated string
+interpolate <- \(template, data, fallback_value = NULL) {
+  result <- template
+  if (is.null(template)) return(template)
+  
+  # Extract all {variable} patterns
+  matches <- gregexpr("\\{([^}]+)\\}", template)[[1]]
+  if (matches[1] == -1) return(template)
+  
+  # Process matches in reverse order to preserve positions
+  match_starts <- as.numeric(matches)
+  match_lengths <- attr(matches, "match.length")
+  
+  for (i in length(match_starts):1) {
+    start <- match_starts[i]
+    length <- match_lengths[i]
+    
+    # Extract variable name
+    var_text <- substr(template, start, start + length - 1)
+    var_name <- gsub("\\{|\\}", "", var_text)
+    
+    # Get replacement value
+    replacement <- if (!is.null(data[[var_name]])) {
+      as.character(data[[var_name]])
+    } else if (!is.null(fallback_value)) {
+      as.character(fallback_value)
+    } else {
+      var_name
+    }
+    
+    # Replace in template
+    result <- paste0(
+      substr(result, 1, start - 1),
+      replacement,
+      substr(result, start + length, nchar(result))
+    )
+  }
+  
+  result
+}
+
 #' Personalize question text with user responses
 #' @param text Question text with {placeholders}
 #' @param responses List of response values
 #' @return Personalized text
 personalize_text <- \(text, responses) {
-  result <- text
-  for (key in names(responses)) {
-    if (key %in% c("adaptive_question_text", "adaptive_question_response", "answered_clearly")) next
-    if (grepl("_raw$", key)) next
-    if (grepl("_answered_clearly$", key)) next
-    pattern <- sprintf("\\{%s\\}", key)
-    result <- gsub(pattern, responses[[key]], result)
-  }
-  result
+  if (is.null(text)) return(text)
+  
+  # Filter out internal fields
+  filtered_responses <- responses[!names(responses) %in% c(
+    "adaptive_question_text", "adaptive_question_response", "answered_clearly"
+  )]
+  filtered_responses <- filtered_responses[!grepl("_raw$|_answered_clearly$", names(filtered_responses))]
+  
+  interpolate(text, filtered_responses)
 }
 
 #' Create streaming bot response generator
@@ -201,9 +246,9 @@ personalize_text <- \(text, responses) {
 #' @return Async generator
 bot_response <- async_generator(function(message, response_delay = NULL, character_delay = NULL) {
   # Use provided delays or defaults from parent environment
-  if (is.null(response_delay)) response_delay <- 0.3
+  if (is.null(response_delay)) response_delay <- 0
   if (is.null(character_delay)) character_delay <- 0.02
-  
+
   await(async_sleep(response_delay))
   chars <- strsplit(as.character(message), "", useBytes = FALSE)[[1]]
   for (char in chars) {
@@ -211,4 +256,3 @@ bot_response <- async_generator(function(message, response_delay = NULL, charact
     await(async_sleep(character_delay))
   }
 })
-

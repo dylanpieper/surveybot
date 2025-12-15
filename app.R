@@ -24,7 +24,7 @@ messages <- list(
   welcome = "Hello! I'd love to learn about your ice cream preferences. 🍨",
   retry = "Sorry, I had trouble understanding that. 🤔 Could you try again?",
   completion = paste(
-    "Thanks, %s! I recorded your love for %s! 🤓📊",
+    "Thanks, {name}! I recorded your love for {ice_cream}! 🤓📊",
     "I hope you enjoy your next scoop soon! 🍦✨"
   )
 )
@@ -32,18 +32,18 @@ messages <- list(
 # Content Templates ----
 content_templates <- list(
   funfact = list(
-    prompt = "Share a fun fact about %s ice cream",
+    prompt = "Share a fun fact about {ice_cream} ice cream",
     schema = type_object(
-      fact = type_string("Brief fun fact (1-2 sentences) with no 'Fun fact:' prefix; include a relevant emoji")
+      fact = type_string("Brief fun fact (1-2 sentences) with no 'Fun fact:' prefix;
+                         include a fun emoji (but don't use the ice cream cone or dish)")
     ),
     response_field = "fact",
     context_fields = list("ice_cream"),
-    intro_template = "Oh, %s! %s\n\n%s",
-    intro_fields = list("ice_cream", "generated_content", "next_question")
+    intro_template = "Oh, {ice_cream}! {generated_content}\n\n{next_question}"
   ),
   follow_up = list(
     prompt = paste(
-      "User '%s' likes %s ice cream because: %s.",
+      "User '{name}' likes {ice_cream} ice cream because: {why_favorite}.",
       "Acknowledge their reason briefly. Then, generate one curious follow-up question",
       "about their ice cream preference based on what they said.",
       "Examples: If they mentioned texture, ask about toppings.",
@@ -57,14 +57,13 @@ content_templates <- list(
     context_fields = list("name", "ice_cream", "why_favorite")
   ),
   recommendation = list(
-    prompt = "Suggest a %s pairing for someone who likes %s ice cream",
+    prompt = "Suggest a {food_type} pairing for someone who likes {ice_cream} ice cream",
     schema = type_object(
       suggestion = type_string("Brief suggestion with emoji")
     ),
     response_field = "suggestion",
     context_fields = list("food_type", "ice_cream"),
-    intro_template = "Here's a great pairing idea: %s\n\n%s",
-    intro_fields = list("generated_content", "next_question")
+    intro_template = "Here's a great pairing idea: {generated_content}\n\n{next_question}"
   )
 )
 
@@ -262,7 +261,10 @@ server <- function(input, output, session) {
       # Handle content generation (adaptive questions, funfacts, etc.)
       if (!is.null(next_q$content_generation)) {
         template_config <- content_templates[[next_q$content_generation]]
-        context_data <- lapply(template_config$context_fields, \(field) rv$responses[[field]])
+        context_data <- setNames(
+          lapply(template_config$context_fields, \(field) rv$responses[[field]]),
+          template_config$context_fields
+        )
 
         tryCatch(
           {
@@ -277,15 +279,14 @@ server <- function(input, output, session) {
               next_question <- fns$personalize_text(next_q$text, rv$responses)
 
               if (!is.null(template_config$intro_template)) {
-                intro_data <- list()
-                for (field in template_config$intro_fields) {
-                  intro_data[[length(intro_data) + 1]] <- switch(field,
-                    "generated_content" = generated_content,
-                    "next_question" = next_question,
-                    rv$responses[[field]]
-                  )
-                }
-                msg <- do.call(sprintf, c(list(template_config$intro_template), intro_data))
+                intro_data <- c(
+                  list(
+                    generated_content = generated_content,
+                    next_question = next_question
+                  ),
+                  rv$responses
+                )
+                msg <- fns$interpolate(template_config$intro_template, intro_data)
                 chat_append("chat", fns$bot_response(msg, config$response_delay, config$character_delay))
               } else {
                 chat_append("chat", fns$bot_response(next_question, config$response_delay, config$character_delay))
@@ -320,11 +321,7 @@ server <- function(input, output, session) {
       rv$session_id <- NULL
 
       # Show completion message
-      msg <- sprintf(
-        messages$completion,
-        rv$responses$name %||% "friend",
-        rv$responses$ice_cream %||% "ice cream"
-      )
+      msg <- fns$interpolate(messages$completion, rv$responses)
       chat_append("chat", fns$bot_response(msg))
     }
 
