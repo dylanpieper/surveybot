@@ -9,8 +9,9 @@ import("cli")
 
 #' Initialize SQLite database with schema
 #' @param db_path Path to database file
-init_database <- \(db_path = "survey.db") {
-  con <- dbConnect(SQLite(), db_path)
+#' @param db_driver Database driver (default RSQLite::SQLite())
+init_database <- \(db_path = "survey.db", db_driver = RSQLite::SQLite()) {
+  con <- dbConnect(db_driver, db_path)
 
   dbExecute(con, "PRAGMA foreign_keys = ON")
 
@@ -195,13 +196,19 @@ personalize_text <- \(text, responses) {
 
 #' Create streaming bot response generator
 #' @param message Message to stream
+#' @param response_delay Initial delay before streaming (default from config)
+#' @param character_delay Delay between characters (default from config)
 #' @return Async generator
-bot_response <- async_generator(function(message) {
-  await(async_sleep(0.3))
+bot_response <- async_generator(function(message, response_delay = NULL, character_delay = NULL) {
+  # Use provided delays or defaults from parent environment
+  if (is.null(response_delay)) response_delay <- 0.3
+  if (is.null(character_delay)) character_delay <- 0.02
+  
+  await(async_sleep(response_delay))
   chars <- strsplit(as.character(message), "", useBytes = FALSE)[[1]]
   for (char in chars) {
     yield(char)
-    await(async_sleep(0.02))
+    await(async_sleep(character_delay))
   }
 })
 

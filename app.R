@@ -6,6 +6,16 @@ library(DBI)
 library(RSQLite)
 library(promises)
 
+# Configuration ----
+config <- list(
+  tries = 1,
+  response_delay = 0.3,
+  character_delay = 0.02,
+  version = "1.0",
+  db_path = "survey.db",
+  db_driver = rlang::expr(RSQLite::SQLite())
+)
+
 # Load functions module
 fns <- modules::use("functions.R")
 
@@ -153,12 +163,11 @@ ui <- page_fillable(
 # Server ----
 server <- function(input, output, session) {
   # Database connection
-  db_path <- "survey.db"
-  if (!file.exists(db_path)) {
-    fns$init_database(db_path)
+  if (!file.exists(config$db_path)) {
+    fns$init_database(config$db_path, eval(config$db_driver))
   }
 
-  con <- dbConnect(SQLite(), db_path)
+  con <- dbConnect(eval(config$db_driver), config$db_path)
 
   onStop(\() {
     dbDisconnect(con)
@@ -180,9 +189,9 @@ server <- function(input, output, session) {
       rv$initialized <- TRUE
 
       # Start database session
-      rv$session_id <- fns$start_session(con, version = "1.0")
+      rv$session_id <- fns$start_session(con, version = config$version)
 
-      chat_append("chat", fns$bot_response(questions[[1]]$text))
+      chat_append("chat", fns$bot_response(questions[[1]]$text, config$response_delay, config$character_delay))
     }
   })
 
@@ -226,10 +235,10 @@ server <- function(input, output, session) {
     )
 
     # Check if answer was clear
-    if (!answered_clearly && rv$retry_count < 1) {
+    if (!answered_clearly && rv$retry_count < config$tries) {
       rv$retry_count <- rv$retry_count + 1
       fns$increment_retry(con, rv$session_id)
-      chat_append("chat", fns$bot_response(messages$retry))
+      chat_append("chat", fns$bot_response(messages$retry, config$response_delay, config$character_delay))
       rv$processing <- FALSE
       return()
     }
@@ -262,7 +271,7 @@ server <- function(input, output, session) {
             if (next_q$content_generation == "follow_up") {
               # Adaptive question generation
               rv$responses$adaptive_question_text <- generated_content
-              chat_append("chat", fns$bot_response(generated_content))
+              chat_append("chat", fns$bot_response(generated_content, config$response_delay, config$character_delay))
             } else {
               # Other content types - add to next question with intro if configured
               next_question <- fns$personalize_text(next_q$text, rv$responses)
@@ -277,9 +286,9 @@ server <- function(input, output, session) {
                   )
                 }
                 msg <- do.call(sprintf, c(list(template_config$intro_template), intro_data))
-                chat_append("chat", fns$bot_response(msg))
+                chat_append("chat", fns$bot_response(msg, config$response_delay, config$character_delay))
               } else {
-                chat_append("chat", fns$bot_response(next_question))
+                chat_append("chat", fns$bot_response(next_question, config$response_delay, config$character_delay))
               }
             }
           },
@@ -291,19 +300,19 @@ server <- function(input, output, session) {
               if (rv$q_num <= length(questions)) {
                 fallback_q <- questions[[rv$q_num]]
                 fallback_text <- fns$personalize_text(fallback_q$text, rv$responses)
-                chat_append("chat", fns$bot_response(fallback_text))
+                chat_append("chat", fns$bot_response(fallback_text, config$response_delay, config$character_delay))
               }
             } else {
               # Show question without generated content
               next_question <- fns$personalize_text(next_q$text, rv$responses)
-              chat_append("chat", fns$bot_response(next_question))
+              chat_append("chat", fns$bot_response(next_question, config$response_delay, config$character_delay))
             }
           }
         )
       } else {
         # Regular question without content generation
         next_question <- fns$personalize_text(next_q$text, rv$responses)
-        chat_append("chat", fns$bot_response(next_question))
+        chat_append("chat", fns$bot_response(next_question, config$response_delay, config$character_delay))
       }
     } else {
       # Survey complete - mark in database
