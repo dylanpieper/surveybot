@@ -15,7 +15,7 @@ The demo collects ice cream preferences through a shinychat UI. The files are mo
 -   **LLM data extraction** with structured schemas and validation
 -   **Adaptive questioning** based on user responses
 -   **Automatic retry logic** for unclear answers
--   **SQLite storage** with session tracking
+-   **SQLite storage** with session tracking (replace with any DB backend)
 
 ## Files
 
