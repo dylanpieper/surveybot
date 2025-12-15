@@ -1,6 +1,6 @@
 # surveybot
 
-surveybot demonstrates conversational data collection using [shinychat](https://posit-dev.github.io/shinychat/) and Claude. Expanding on traditional surveys and interviews, users answer questions through natural conversation while the LLM extracts structured data, generates content, and asks adaptive follow-up questions.
+surveybot enables conversational data collection using [shinychat](https://posit-dev.github.io/shinychat/). Expanding on traditional surveys and interviews, users answer questions through natural dialogue while the LLM extracts structured data, generates content, and asks adaptive follow-up questions.
 
 ## Usage 🍦✨
 
@@ -15,7 +15,7 @@ The demo collects ice cream preferences through a shinychat UI. The files are mo
 -   **LLM data extraction** with structured schemas and validation
 -   **Adaptive questioning** based on user responses
 -   **Automatic retry logic** for unclear answers
--   **SQLite storage** with session tracking (replace with any DB backend)
+-   **SQL storage** with tables "sessions" and "responses" (default is SQLite)
 
 ## Files
 
