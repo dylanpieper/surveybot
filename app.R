@@ -6,6 +6,9 @@ library(DBI)
 library(RSQLite)
 library(promises)
 
+# Load functions module
+fns <- modules::use("functions.R")
+
 # Configuration ----
 config <- list(
   tries = 1,
@@ -15,9 +18,6 @@ config <- list(
   db_path = "survey.db",
   db_driver = rlang::expr(RSQLite::SQLite())
 )
-
-# Load functions module
-fns <- modules::use("functions.R")
 
 # Messages ----
 messages <- list(
