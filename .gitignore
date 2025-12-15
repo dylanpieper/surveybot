@@ -2,7 +2,5 @@
 .Rhistory
 .RData
 .Ruserdata
-*.json
-*.udpipe
 .DS_Store
-rsconnect/
+*.db
