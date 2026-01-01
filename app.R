@@ -32,13 +32,8 @@ messages <- list(
 # Content Templates ----
 content_templates <- list(
   funfact = list(
-    prompt = "Share a fun fact about {ice_cream} ice cream",
-    schema = type_object(
-      fact = type_string("Brief fun fact (1-2 sentences) with no 'Fun fact:' prefix;
-                         include a fun emoji (but don't use the ice cream cone or dish)")
-    ),
+    prompt = "Share a fun fact about {ice_cream} ice cream. Return a brief fun fact (1-2 sentences) with no 'Fun fact:' prefix; include a fun emoji (but don't use the ice cream cone or dish).",
     response_field = "fact",
-    context_fields = list("ice_cream"),
     intro_template = "Oh, {ice_cream}! {generated_content}\n\n{next_question}"
   ),
   follow_up = list(
@@ -46,23 +41,15 @@ content_templates <- list(
       "User '{name}' likes {ice_cream} ice cream because: {why_favorite}.",
       "Acknowledge their reason briefly. Then, generate one curious follow-up question",
       "about their ice cream preference based on what they said.",
-      "Examples: If they mentioned texture, ask about toppings.",
+      "Examples: If they mention texture, ask about their experience or if they add extra toppings.",
       "If they mentioned nostalgia, ask about memories.",
       "Return ONLY the question text with no preamble."
     ),
-    schema = type_object(
-      question = type_string("Just the question text")
-    ),
-    response_field = "question",
-    context_fields = list("name", "ice_cream", "why_favorite")
+    response_field = "question"
   ),
   recommendation = list(
-    prompt = "Suggest a {food_type} pairing for someone who likes {ice_cream} ice cream",
-    schema = type_object(
-      suggestion = type_string("Brief suggestion with emoji")
-    ),
+    prompt = "Suggest a {food_type} pairing for someone who likes {ice_cream} ice cream. Return a brief suggestion with emoji.",
     response_field = "suggestion",
-    context_fields = list("food_type", "ice_cream"),
     intro_template = "Here's a great pairing idea: {generated_content}\n\n{next_question}"
   )
 )
@@ -75,8 +62,8 @@ questions <- list(
     schema = type_object(
       name = type_string("Just the person's name, e.g. 'Dylan' from 'call me dylan'"),
       answered_clearly = type_boolean(paste(
-        "TRUE if they provided any first and/or last name,",
-        "FALSE only if completely off-topic, only a nickname, or no name given"
+        "TRUE if they provided any reasonable first and/or last name,",
+        "FALSE only if completely off-topic, only a nickname is given, or no name is given"
       ))
     )
   ),
@@ -227,8 +214,8 @@ server <- function(input, output, session) {
       question_id = current_q$id,
       question_order = rv$q_num,
       question_text = question_text,
-      raw_input = user_input,
-      extracted_value = extracted_data[[field_name]],
+      input_raw = user_input,
+      input_extracted = extracted_data[[field_name]],
       answered_clearly = answered_clearly,
       retry_attempt = rv$retry_count
     )
@@ -261,9 +248,11 @@ server <- function(input, output, session) {
       # Handle content generation (adaptive questions, funfacts, etc.)
       if (!is.null(next_q$content_generation)) {
         template_config <- content_templates[[next_q$content_generation]]
+        # Auto-extract required fields from template
+        required_fields <- fns$extract_variables(template_config$prompt)
         context_data <- setNames(
-          lapply(template_config$context_fields, \(field) rv$responses[[field]]),
-          template_config$context_fields
+          lapply(required_fields, \(field) rv$responses[[field]]),
+          required_fields
         )
 
         tryCatch(
