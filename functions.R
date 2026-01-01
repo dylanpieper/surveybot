@@ -4,6 +4,7 @@ import("coro")
 import("ellmer")
 import("promises")
 import("cli")
+import("shiny")
 
 # Database Setup ----
 
@@ -42,6 +43,7 @@ init_database <- \(db_path = "survey.db", db_driver = RSQLite::SQLite()) {
       answered_clearly BOOLEAN,
       responded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       retry_attempt INTEGER DEFAULT 0,
+      question_duration_seconds INTEGER,
 
       FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
     )
@@ -81,15 +83,16 @@ start_session <- \(con, version = "1.0") {
 #' @param input_extracted Cleaned/extracted value
 #' @param answered_clearly Boolean quality flag
 #' @param retry_attempt Which attempt (0 = first)
+#' @param question_duration_seconds Duration in seconds for this question
 save_response <- \(con, session_id, question_id, question_order, question_text,
   input_raw, input_extracted = NULL, answered_clearly = NULL,
-  retry_attempt = 0) {
+  retry_attempt = 0, question_duration_seconds = NULL) {
   dbExecute(
     con,
     "INSERT INTO responses
      (session_id, question_id, question_order, question_text, input_raw,
-      input_extracted, answered_clearly, retry_attempt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      input_extracted, answered_clearly, retry_attempt, question_duration_seconds)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     params = list(
       as.integer(session_id),
       as.character(question_id),
@@ -98,8 +101,22 @@ save_response <- \(con, session_id, question_id, question_order, question_text,
       as.character(input_raw),
       if (is.null(input_extracted)) NULL else as.character(input_extracted),
       if (is.null(answered_clearly)) NULL else as.logical(answered_clearly),
-      as.integer(retry_attempt)
+      as.integer(retry_attempt),
+      if (is.null(question_duration_seconds)) NULL else as.integer(question_duration_seconds)
     )
+  )
+}
+
+#' Update session duration
+#' @param con Database connection
+#' @param session_id Integer session ID
+update_session_duration <- \(con, session_id) {
+  dbExecute(
+    con,
+    "UPDATE sessions SET 
+       duration_seconds = CAST((julianday(CURRENT_TIMESTAMP) - julianday(started_at)) * 86400 AS INTEGER)
+     WHERE session_id = ?",
+    params = list(session_id)
   )
 }
 
@@ -346,14 +363,10 @@ personalize_text <- \(text, responses) {
 
 #' Create streaming bot response generator
 #' @param message Message to stream
-#' @param response_delay Initial delay before streaming (default from config)
-#' @param character_delay Delay between characters (default from config)
+#' @param response_delay Initial delay before streaming (default 0)
+#' @param character_delay Delay between characters (default 0.02)
 #' @return Async generator
-bot_response <- async_generator(function(message, response_delay = NULL, character_delay = NULL) {
-  # Use provided delays or defaults from parent environment
-  if (is.null(response_delay)) response_delay <- 0
-  if (is.null(character_delay)) character_delay <- 0.02
-
+bot_response <- async_generator(function(message, response_delay = 0, character_delay = 0.02) {
   await(async_sleep(response_delay))
   chars <- strsplit(as.character(message), "", useBytes = FALSE)[[1]]
   for (char in chars) {
@@ -361,3 +374,414 @@ bot_response <- async_generator(function(message, response_delay = NULL, charact
     await(async_sleep(character_delay))
   }
 })
+
+# Survey Configuration ----
+
+#' Create complete survey configuration
+#' @param topic The main topic of the survey (e.g., "ice cream", "coffee", "music")
+#' @param topic_emoji Emoji representing the topic
+#' @param subject_field Name of the field storing the subject preference
+#' @param location_context Context for location question (e.g., "spot", "place", "store")
+#' @return List containing messages, content_templates, and questions
+survey_config <- \(topic = "ice cream", topic_emoji = "🍨", subject_field = "ice_cream", location_context = "spot") {
+  
+  messages <- list(
+    welcome = paste("Hello! I'd love to learn about your", topic, "preferences.", topic_emoji),
+    retry = "Sorry, I had trouble understanding that. 🤔 Could you try again?",
+    completion = paste(
+      "Thanks, {name}! I recorded your love for {", subject_field, "}! 🤓📊",
+      "I hope you enjoy your next", topic, "soon!", topic_emoji, "✨"
+    )
+  )
+  
+  content_templates <- list(
+    funfact = list(
+      prompt = paste("Share a fun fact about {", subject_field, "} ", topic, ". Return a brief fun fact (1-2 sentences) with no 'Fun fact:' prefix; include a fun emoji (but don't use the ", topic, " emoji)."),
+      response_field = "fact",
+      intro_template = paste("Oh, {", subject_field, "}! {generated_content}\n\n{next_question}")
+    ),
+    follow_up = list(
+      prompt = paste(
+        "User '{name}' likes {", subject_field, "} ", topic, " because: {why_favorite}.",
+        "Acknowledge their reason briefly. Then, generate one curious follow-up question",
+        "about their", topic, "preference based on what they said.",
+        "Examples: If they mention texture, ask about their experience or if they add extra toppings/additions.",
+        "If they mentioned nostalgia, ask about memories.",
+        "Return ONLY the question text with no preamble."
+      ),
+      response_field = "question"
+    ),
+    recommendation = list(
+      prompt = paste("Suggest a {food_type} pairing for someone who likes {", subject_field, "} ", topic, ". Return a brief suggestion with emoji."),
+      response_field = "suggestion",
+      intro_template = "Here's a great pairing idea: {generated_content}\n\n{next_question}"
+    )
+  )
+  
+  questions <- list(
+    list(
+      id = "name",
+      text = "What's your name?",
+      schema = type_object(
+        name = type_string("Just the person's name, e.g. 'Dylan' from 'call me dylan'"),
+        answered_clearly = type_boolean("TRUE if they provided any reasonable first and/or last name, FALSE only if completely off-topic, only a nickname is given, or no name is given")
+      )
+    ),
+    list(
+      id = subject_field,
+      text = paste("Hey {name}! Let's talk", topic, ".", topic_emoji, "What's your favorite", if(topic == "ice cream") "flavor" else "type", "?"),
+      schema = if(subject_field == "ice_cream") {
+        type_object(
+          ice_cream = type_string("The ice cream flavor, e.g. 'mint chocolate chip'"),
+          answered_clearly = type_boolean("TRUE if they mentioned any flavor, FALSE only if completely off-topic")
+        )
+      } else {
+        type_object(
+          preference = type_string(paste("The", topic, "type, e.g. 'rock'", collapse = " ")),
+          answered_clearly = type_boolean(paste("TRUE if they mentioned any", topic, "type, FALSE only if completely off-topic", collapse = " "))
+        )
+      }
+    ),
+    list(
+      id = "why_favorite",
+      text = if(topic == "ice cream") "What about {ice_cream} makes it your favorite ice cream flavor?" else paste0("What about {", subject_field, "} makes it your favorite ", topic, " type?"),
+      content_generation = "funfact",
+      schema = type_object(
+        why_favorite = type_string("The reason why they like this preference"),
+        answered_clearly = type_boolean("TRUE if they mentioned ANY positive feeling, emotion, memory, or reason related to their preference, even if very brief like 'I love it' or 'It reminds me of something'. FALSE only if completely off-topic, rude, or makes no sense")
+      )
+    ),
+    list(
+      id = "fu_favorite",
+      text = NULL,
+      content_generation = "follow_up",
+      schema = type_object(
+        fu_favorite = type_string("The core answer to the adaptive question"),
+        answered_clearly = type_boolean("TRUE if they provided ANY answer that shows engagement with the question, even if brief, somewhat vague, or unconventional. FALSE only if completely off-topic or rude")
+      )
+    ),
+    list(
+      id = "brand_shop",
+      text = paste("Love it! Where's your go-to", location_context, "to get {", subject_field, "} ", topic, "? 👀"),
+      schema = type_object(
+        brand_shop = type_string(paste(
+          "Brand or shop name EXACTLY as stated by user, no inference.",
+          "If vague like 'the store', extract that literally"
+        )),
+        answered_clearly = type_boolean("TRUE if they named a specific brand/shop/location, FALSE if too vague (like 'the store', 'somewhere') or off-topic")
+      )
+    ),
+    list(
+      id = "when_eat",
+      text = paste("{brand_shop} is a great choice! When do you crave {", subject_field, "} the most? 🤔"),
+      schema = type_object(
+        when_eat = type_string(paste("Brief summary of when they", if(topic %in% c("ice cream", "coffee", "tea")) "consume" else "enjoy", topic)),
+        answered_clearly = type_boolean("TRUE if they described any timing, occasion, situation, or context for consuming/enjoying their preference, even if somewhat vague or unconventional. FALSE only if completely off-topic or rude")
+      )
+    )
+  )
+  
+  list(
+    messages = messages,
+    content_templates = content_templates,
+    questions = questions
+  )
+}
+
+# Configuration ----
+
+#' Default survey configuration
+#' @param db_path Database file path
+#' @param db_driver Database driver expression
+#' @param tries Maximum retry attempts for unclear responses
+#' @param response_delay Delay before bot response (seconds)
+#' @param character_delay Delay between characters in streaming (seconds)
+#' @param version Survey version
+#' @return Configuration list
+default_config <- \(db_path = "survey.db", 
+                   db_driver = rlang::expr(RSQLite::SQLite()),
+                   tries = 2,
+                   response_delay = 0,
+                   character_delay = 0.02,
+                   version = "1.0") {
+  list(
+    db_path = db_path,
+    db_driver = db_driver,
+    tries = tries,
+    response_delay = response_delay,
+    character_delay = character_delay,
+    version = version
+  )
+}
+
+# Survey Class ----
+
+#' Create a Survey class instance
+#' @param chat Chat object for AI interactions
+#' @param questions List of survey questions
+#' @param messages Message templates
+#' @param content_templates Content generation templates
+#' @param config Application configuration (optional, uses defaults)
+#' @return Survey class instance
+Survey <- function(chat, questions, messages, content_templates, config = default_config()) {
+  # Initialize database connection
+  if (!file.exists(config$db_path)) {
+    init_database(config$db_path, eval(config$db_driver))
+  }
+  con <- dbConnect(eval(config$db_driver), config$db_path)
+  
+  self <- list(
+    # State
+    chat = chat,
+    con = con,
+    questions = questions,
+    messages = messages,
+    content_templates = content_templates,
+    config = config,
+    
+    # Survey state
+    q_num = 1,
+    responses = list(),
+    retry_count = 0,
+    session_id = NULL,
+    processing = FALSE,
+    question_start_time = NULL
+  )
+  
+  # Initialize database session and return first question
+  self$init <- function() {
+    self$session_id <<- start_session(self$con, version = self$config$version)
+    self$question_start_time <<- Sys.time()
+    return(self$questions[[1]]$text)
+  }
+  
+  # Cleanup database connection
+  self$cleanup <- function() {
+    if (!is.null(self$con)) {
+      dbDisconnect(self$con)
+      self$con <<- NULL
+    }
+  }
+  
+  # Process user input and return message to send
+  self$process_input <- function(user_input) {
+    if (self$processing) {
+      return(list(message = NULL, complete = FALSE))
+    }
+    
+    self$processing <<- TRUE
+    
+    # Get current question
+    current_q <- self$questions[[self$q_num]]
+    
+    # Extract and save response
+    extracted_data <- extract_response(self$chat, user_input, current_q$schema)
+    field_name <- current_q$id
+    answered_clearly <- extracted_data$answered_clearly
+    
+    # Determine question text for database
+    question_text <- if (!is.null(current_q$content_generation) && 
+                        current_q$content_generation == "follow_up") {
+      self$responses$adaptive_question_text
+    } else {
+      personalize_text(current_q$text, self$responses)
+    }
+    
+    # Calculate question duration
+    question_duration <- if (!is.null(self$question_start_time)) {
+      as.integer(difftime(Sys.time(), self$question_start_time, units = "secs"))
+    } else {
+      NULL
+    }
+    
+    # Save to database
+    save_response(
+      self$con,
+      session_id = self$session_id,
+      question_id = current_q$id,
+      question_order = self$q_num,
+      question_text = question_text,
+      input_raw = user_input,
+      input_extracted = extracted_data[[field_name]],
+      answered_clearly = answered_clearly,
+      retry_attempt = self$retry_count,
+      question_duration_seconds = question_duration
+    )
+    
+    # Update session duration
+    update_session_duration(self$con, self$session_id)
+    
+    # Check if retry needed
+    if (!answered_clearly && self$retry_count < self$config$tries) {
+      self$retry_count <<- self$retry_count + 1
+      increment_retry(self$con, self$session_id)
+      self$processing <<- FALSE
+      return(list(message = self$messages$retry, complete = FALSE))
+    }
+    
+    # Store response data
+    self$responses[[field_name]] <<- extracted_data[[field_name]]
+    self$responses[[paste0(field_name, "_raw")]] <<- user_input
+    self$responses[[paste0(field_name, "_answered_clearly")]] <<- answered_clearly
+    self$retry_count <<- 0
+    
+    # Move to next question
+    self$q_num <<- self$q_num + 1
+    
+    # Reset question start time for next question
+    self$question_start_time <<- Sys.time()
+    
+    # Check if survey complete
+    if (self$q_num > length(self$questions)) {
+      complete_session(self$con, self$session_id)
+      completion_message <- interpolate(self$messages$completion, self$responses)
+      self$processing <<- FALSE
+      return(list(message = completion_message, complete = TRUE))
+    }
+    
+    # Get next question and generate content
+    next_q <- self$questions[[self$q_num]]
+    generated_content <- self$generate_content(next_q)
+    
+    # Handle failed adaptive questions
+    if (is.null(generated_content) && !is.null(next_q$content_generation) && next_q$content_generation == "follow_up") {
+      # Skip to next question
+      self$q_num <<- self$q_num + 1
+      self$question_start_time <<- Sys.time()
+      
+      if (self$q_num > length(self$questions)) {
+        complete_session(self$con, self$session_id)
+        completion_message <- interpolate(self$messages$completion, self$responses)
+        self$processing <<- FALSE
+        return(list(message = completion_message, complete = TRUE))
+      }
+      
+      fallback_q <- self$questions[[self$q_num]]
+      fallback_message <- personalize_text(fallback_q$text, self$responses)
+      self$processing <<- FALSE
+      return(list(message = fallback_message, complete = FALSE))
+    }
+    
+    # Store adaptive question text for database
+    if (!is.null(generated_content) && next_q$content_generation == "follow_up") {
+      self$responses$adaptive_question_text <<- generated_content
+    }
+    
+    # Build and return final message
+    message <- self$build_message(next_q, generated_content)
+    self$processing <<- FALSE
+    return(list(message = message, complete = FALSE))
+  }
+  
+  # Generate content for question
+  self$generate_content <- function(question) {
+    if (is.null(question$content_generation)) {
+      return(NULL)
+    }
+    
+    template_config <- self$content_templates[[question$content_generation]]
+    
+    # Auto-extract required fields from template
+    required_fields <- extract_variables(template_config$prompt)
+    context_data <- list()
+    for (field in required_fields) {
+      context_data[[field]] <- self$responses[[field]]
+    }
+    names(context_data) <- required_fields
+    
+    tryCatch(
+      {
+        generate_content(self$chat, template_config, context_data)
+      },
+      error = function(err) {
+        message(paste("Content generation failed:", question$content_generation))
+        NULL
+      }
+    )
+  }
+  
+  # Build message for question
+  self$build_message <- function(question, generated_content = NULL) {
+    question_text <- personalize_text(question$text, self$responses)
+    
+    if (!is.null(generated_content) && !is.null(question$content_generation)) {
+      template_config <- self$content_templates[[question$content_generation]]
+      
+      if (question$content_generation == "follow_up") {
+        # For adaptive questions, return the generated content directly
+        return(generated_content)
+      } else if (!is.null(template_config$intro_template)) {
+        # For other content types, combine with intro template
+        intro_data <- c(
+          list(
+            generated_content = generated_content,
+            next_question = question_text
+          ),
+          self$responses
+        )
+        return(interpolate(template_config$intro_template, intro_data))
+      }
+    }
+    
+    return(question_text)
+  }
+  
+  # Return the survey instance
+  class(self) <- "Survey"
+  return(self)
+}
+
+# Server Function ----
+
+#' Survey in Shiny server
+#' @param input Shiny input object
+#' @param output Shiny output object  
+#' @param session Shiny session object
+#' @param chat Chat object for AI interactions
+#' @param questions List of survey questions
+#' @param messages Message templates
+#' @param content_templates Content generation templates
+#' @param config Optional configuration (uses defaults if not provided)
+survey <- function(input, output, session, chat, questions, messages, content_templates, config = default_config()) {
+  survey <- NULL
+  initialized <- FALSE
+  
+  # Initialize survey and send first question
+  observe({
+    if (!initialized) {
+      initialized <<- TRUE
+      survey <<- Survey(chat, questions, messages, content_templates, config)
+      
+      # Setup cleanup on session end
+      onStop(\() {
+        if (!is.null(survey)) {
+          survey$cleanup()
+        }
+      })
+      
+      # Send first question
+      first_question <- survey$init()
+      shinychat::chat_append("chat", bot_response(first_question), session = session)
+    }
+  })
+  
+  # Handle user responses
+  observeEvent(input$chat_user_input, {
+    if (is.null(survey)) return()
+    
+    user_input <- input$chat_user_input
+    result <- survey$process_input(user_input)
+    
+    if (!is.null(result$message)) {
+      if (result$complete) {
+        # Survey finished
+        shinychat::chat_append("chat", bot_response(result$message), session = session)
+        survey$cleanup()
+        survey <<- NULL
+      } else {
+        # Continue with next question or retry
+        shinychat::chat_append("chat", bot_response(result$message), session = session)
+      }
+    }
+  })
+}
