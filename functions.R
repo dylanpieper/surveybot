@@ -446,7 +446,7 @@ survey_config <- \(topic = "ice cream", topic_emoji = "🍨", subject_field = "i
     list(
       id = "why_favorite",
       text = if(topic == "ice cream") "What about {ice_cream} makes it your favorite ice cream flavor?" else paste0("What about {", subject_field, "} makes it your favorite ", topic, " type?"),
-      content_generation = "funfact",
+      content = "funfact",
       schema = type_object(
         why_favorite = type_string("The reason why they like this preference"),
         answered_clearly = type_boolean("TRUE if they mentioned ANY positive feeling, emotion, memory, or reason related to their preference, even if very brief like 'I love it' or 'It reminds me of something'. FALSE only if completely off-topic, rude, or makes no sense")
@@ -455,7 +455,7 @@ survey_config <- \(topic = "ice cream", topic_emoji = "🍨", subject_field = "i
     list(
       id = "fu_favorite",
       text = NULL,
-      content_generation = "follow_up",
+      content = "follow_up",
       schema = type_object(
         fu_favorite = type_string("The core answer to the adaptive question"),
         answered_clearly = type_boolean("TRUE if they provided ANY answer that shows engagement with the question, even if brief, somewhat vague, or unconventional. FALSE only if completely off-topic or rude")
@@ -581,8 +581,8 @@ Survey <- function(chat, questions, messages, content, config = default_config()
     answered_clearly <- extracted_data$answered_clearly
     
     # Determine question text for database
-    question_text <- if (!is.null(current_q$content_generation) && 
-                        current_q$content_generation == "follow_up") {
+    question_text <- if (!is.null(current_q$content) && 
+                        current_q$content == "follow_up") {
       self$responses$adaptive_question_text
     } else {
       personalize_text(current_q$text, self$responses)
@@ -645,7 +645,7 @@ Survey <- function(chat, questions, messages, content, config = default_config()
     generated_content <- self$generate_content(next_q)
     
     # Handle failed adaptive questions
-    if (is.null(generated_content) && !is.null(next_q$content_generation) && next_q$content_generation == "follow_up") {
+    if (is.null(generated_content) && !is.null(next_q$content) && next_q$content == "follow_up") {
       # Skip to next question
       self$q_num <<- self$q_num + 1
       self$question_start_time <<- Sys.time()
@@ -664,7 +664,7 @@ Survey <- function(chat, questions, messages, content, config = default_config()
     }
     
     # Store adaptive question text for database
-    if (!is.null(generated_content) && next_q$content_generation == "follow_up") {
+    if (!is.null(generated_content) && next_q$content == "follow_up") {
       self$responses$adaptive_question_text <<- generated_content
     }
     
@@ -676,11 +676,11 @@ Survey <- function(chat, questions, messages, content, config = default_config()
   
   # Generate content for question
   self$generate_content <- function(question) {
-    if (is.null(question$content_generation)) {
+    if (is.null(question$content)) {
       return(NULL)
     }
     
-    template_config <- self$content[[question$content_generation]]
+    template_config <- self$content[[question$content]]
     
     # Auto-extract required fields from template
     required_fields <- extract_variables(template_config$prompt)
@@ -695,7 +695,7 @@ Survey <- function(chat, questions, messages, content, config = default_config()
         generate_content(self$chat, template_config, context_data)
       },
       error = function(err) {
-        message(paste("Content generation failed:", question$content_generation))
+        message(paste("Content generation failed:", question$content))
         NULL
       }
     )
@@ -705,10 +705,10 @@ Survey <- function(chat, questions, messages, content, config = default_config()
   self$build_message <- function(question, generated_content = NULL) {
     question_text <- personalize_text(question$text, self$responses)
     
-    if (!is.null(generated_content) && !is.null(question$content_generation)) {
-      template_config <- self$content[[question$content_generation]]
+    if (!is.null(generated_content) && !is.null(question$content)) {
+      template_config <- self$content[[question$content]]
       
-      if (question$content_generation == "follow_up") {
+      if (question$content == "follow_up") {
         # For adaptive questions, return the generated content directly
         return(generated_content)
       } else if (!is.null(template_config$intro)) {
@@ -743,7 +743,7 @@ Survey <- function(chat, questions, messages, content, config = default_config()
 #' @param messages Message templates
 #' @param content Content generation templates
 #' @param config Optional configuration (uses defaults if not provided)
-survey <- function(input, output, session, chat, questions, messages, content, config = default_config()) {
+chat_survey <- function(input, output, session, chat, questions, messages, content, config = default_config()) {
   survey <- NULL
   initialized <- FALSE
   

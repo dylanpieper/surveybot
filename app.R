@@ -58,7 +58,7 @@ questions <- list(
   list(
     id = "why_favorite",
     text = "What about {ice_cream} makes it your favorite ice cream flavor?",
-    content_generation = "funfact",
+    content = "funfact",
     schema = type_object(
       why_favorite = type_string("The reason why they like this preference"),
       answered_clearly = type_boolean("TRUE if they mentioned ANY positive feeling, emotion, memory, or reason related to their preference, even if very brief like 'I love it' or 'It reminds me of something'. FALSE only if completely off-topic, rude, or makes no sense")
@@ -67,7 +67,7 @@ questions <- list(
   list(
     id = "fu_favorite",
     text = NULL,
-    content_generation = "follow_up",
+    content = "follow_up",
     schema = type_object(
       fu_favorite = type_string("The core answer to the adaptive question"),
       answered_clearly = type_boolean("TRUE if they provided ANY answer that shows engagement with the question, even if brief, somewhat vague, or unconventional. FALSE only if completely off-topic or rude")
@@ -107,7 +107,7 @@ ui <- page_fillable(
 
 # Server ----
 server <- \(input, output, session) {
-  fns$survey(input, output, session, chat, questions, messages, content)
+  fns$chat_survey(input, output, session, chat, questions, messages, content)
 }
 
 # Run ----
