@@ -148,6 +148,7 @@ increment_retry <- \(con, session_id) {
 
 # Async Chat Operations ----
 
+
 #' Extract structured response from user input (synchronous)
 #' @param chat Chat object
 #' @param user_response User's text input
@@ -159,14 +160,14 @@ extract_response <- \(chat, user_response, schema) {
 
 #' Generate content using templates
 #' @param chat Chat object
-#' @param template_config Template configuration with prompt, schema, response_field
+#' @param template_config Template configuration with prompt, intro (optional)
 #' @param context_data Named list of values for template placeholders
 #' @return Generated content
 generate_content <- \(chat, template_config, context_data = list()) {
   prompt <- interpolate(template_config$prompt, context_data)
-  schema <- create_generic_schema(template_config$response_field)
+  schema <- create_generic_schema("content")
   result <- chat$clone()$set_turns(list())$chat_structured(prompt, type = schema)
-  result[[template_config$response_field]]
+  result[["content"]]
 }
 
 #' Build context string from template and field mapping
@@ -326,11 +327,11 @@ extract_variables <- \(template) {
 }
 
 #' Generate generic schema for content extraction
-#' @param response_field Name of the response field to extract
+#' @param field_name Name of the field to extract
 #' @return Schema object for structured data
-create_generic_schema <- \(response_field) {
+create_generic_schema <- \(field_name = "content") {
   schema_list <- list()
-  schema_list[[response_field]] <- type_string(paste("Extract", response_field, "content"))
+  schema_list[[field_name]] <- type_string("Extract the generated content")
   do.call(type_object, schema_list)
 }
 
@@ -520,10 +521,10 @@ default_config <- \(db_path = "survey.db",
 #' @param chat Chat object for AI interactions
 #' @param questions List of survey questions
 #' @param messages Message templates
-#' @param content_templates Content generation templates
+#' @param content Content generation templates
 #' @param config Application configuration (optional, uses defaults)
 #' @return Survey class instance
-Survey <- function(chat, questions, messages, content_templates, config = default_config()) {
+Survey <- function(chat, questions, messages, content, config = default_config()) {
   # Initialize database connection
   if (!file.exists(config$db_path)) {
     init_database(config$db_path, eval(config$db_driver))
@@ -536,7 +537,7 @@ Survey <- function(chat, questions, messages, content_templates, config = defaul
     con = con,
     questions = questions,
     messages = messages,
-    content_templates = content_templates,
+    content = content,
     config = config,
     
     # Survey state
@@ -679,7 +680,7 @@ Survey <- function(chat, questions, messages, content_templates, config = defaul
       return(NULL)
     }
     
-    template_config <- self$content_templates[[question$content_generation]]
+    template_config <- self$content[[question$content_generation]]
     
     # Auto-extract required fields from template
     required_fields <- extract_variables(template_config$prompt)
@@ -705,21 +706,21 @@ Survey <- function(chat, questions, messages, content_templates, config = defaul
     question_text <- personalize_text(question$text, self$responses)
     
     if (!is.null(generated_content) && !is.null(question$content_generation)) {
-      template_config <- self$content_templates[[question$content_generation]]
+      template_config <- self$content[[question$content_generation]]
       
       if (question$content_generation == "follow_up") {
         # For adaptive questions, return the generated content directly
         return(generated_content)
-      } else if (!is.null(template_config$intro_template)) {
+      } else if (!is.null(template_config$intro)) {
         # For other content types, combine with intro template
         intro_data <- c(
           list(
-            generated_content = generated_content,
+            content = generated_content,
             next_question = question_text
           ),
           self$responses
         )
-        return(interpolate(template_config$intro_template, intro_data))
+        return(interpolate(template_config$intro, intro_data))
       }
     }
     
@@ -740,9 +741,9 @@ Survey <- function(chat, questions, messages, content_templates, config = defaul
 #' @param chat Chat object for AI interactions
 #' @param questions List of survey questions
 #' @param messages Message templates
-#' @param content_templates Content generation templates
+#' @param content Content generation templates
 #' @param config Optional configuration (uses defaults if not provided)
-survey <- function(input, output, session, chat, questions, messages, content_templates, config = default_config()) {
+survey <- function(input, output, session, chat, questions, messages, content, config = default_config()) {
   survey <- NULL
   initialized <- FALSE
   
@@ -750,7 +751,7 @@ survey <- function(input, output, session, chat, questions, messages, content_te
   observe({
     if (!initialized) {
       initialized <<- TRUE
-      survey <<- Survey(chat, questions, messages, content_templates, config)
+      survey <<- Survey(chat, questions, messages, content, config)
       
       # Setup cleanup on session end
       onStop(\() {

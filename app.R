@@ -19,12 +19,11 @@ messages <- list(
   )
 )
 
-# Content Templates ----
-content_templates <- list(
+# Content templates ----
+content <- list(
   funfact = list(
-    prompt = "Share a fun fact about {ice_cream} ice cream. Return a brief fun fact (1-2 sentences) with no 'Fun fact:' prefix; include a fun emoji (but don't use the ice cream cone or dish).",
-    response_field = "fact",
-    intro_template = "Oh, {ice_cream}! {generated_content}\n\n{next_question}"
+    prompt = "Share a fun fact about {ice_cream} ice cream. Return a brief fun fact (1-2 sentences) with  no prefix and include a fun emoji (but don't use the ice cream cone or dish).",
+    intro = "Oh, {ice_cream}! {content}\n\n{next_question}"
   ),
   follow_up = list(
     prompt = paste(
@@ -34,8 +33,7 @@ content_templates <- list(
       "Examples: If they mention texture, ask about their experience or if they add extra toppings.",
       "If they mentioned nostalgia, ask about memories.",
       "Return ONLY the question text with no preamble."
-    ),
-    response_field = "question"
+    )
   )
 )
 
@@ -109,7 +107,7 @@ ui <- page_fillable(
 
 # Server ----
 server <- \(input, output, session) {
-  fns$survey(input, output, session, chat, questions, messages, content_templates)
+  fns$survey(input, output, session, chat, questions, messages, content)
 }
 
 # Run ----
