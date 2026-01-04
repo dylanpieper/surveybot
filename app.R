@@ -98,10 +98,7 @@ chat <- chat_claude(echo = "none")
 ui <- page_fillable(
   card(
     card_header("SurveyBot"),
-    chat_ui(
-      id = "chat",
-      messages = messages$welcome
-    )
+    chat_ui(id = "chat")
   )
 )
 

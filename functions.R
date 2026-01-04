@@ -365,14 +365,18 @@ personalize_text <- \(text, responses) {
 #' Create streaming bot response generator
 #' @param message Message to stream
 #' @param response_delay Initial delay before streaming (default 0)
-#' @param character_delay Delay between characters (default 0.02)
+#' @param character_delay Base delay between characters (default 0.02)
+#' @param delay_variance Randomness factor for character delay (default 0.01)
 #' @return Async generator
-bot_response <- async_generator(function(message, response_delay = 0, character_delay = 0.02) {
+bot_response <- async_generator(function(message, response_delay = 0, character_delay = 0.02, delay_variance = 0.01) {
   await(async_sleep(response_delay))
   chars <- strsplit(as.character(message), "", useBytes = FALSE)[[1]]
   for (char in chars) {
+    # Add randomness to typing delay
+    random_delay <- character_delay + stats::runif(1, -delay_variance, delay_variance)
+    random_delay <- max(0.005, random_delay)  # Ensure minimum delay
     yield(char)
-    await(async_sleep(character_delay))
+    await(async_sleep(random_delay))
   }
 })
 
@@ -497,6 +501,7 @@ survey_config <- \(topic = "ice cream", topic_emoji = "🍨", subject_field = "i
 #' @param tries Maximum retry attempts for unclear responses
 #' @param response_delay Delay before bot response (seconds)
 #' @param character_delay Delay between characters in streaming (seconds)
+#' @param delay_variance Randomness factor for character delay (seconds)
 #' @param version Survey version
 #' @return Configuration list
 default_config <- \(db_path = "survey.db", 
@@ -504,6 +509,7 @@ default_config <- \(db_path = "survey.db",
                    tries = 2,
                    response_delay = 0,
                    character_delay = 0.02,
+                   delay_variance = 0.01,
                    version = "1.0") {
   list(
     db_path = db_path,
@@ -511,6 +517,7 @@ default_config <- \(db_path = "survey.db",
     tries = tries,
     response_delay = response_delay,
     character_delay = character_delay,
+    delay_variance = delay_variance,
     version = version
   )
 }
@@ -549,10 +556,15 @@ Survey <- function(chat, questions, messages, content, config = default_config()
     question_start_time = NULL
   )
   
-  # Initialize database session and return first question
+  # Initialize database session and return welcome message
   self$init <- function() {
     self$session_id <<- start_session(self$con, version = self$config$version)
     self$question_start_time <<- Sys.time()
+    return(self$messages$welcome)
+  }
+  
+  # Get first question text
+  self$get_first_question <- function() {
     return(self$questions[[1]]$text)
   }
   
@@ -760,9 +772,25 @@ chat_survey <- function(input, output, session, chat, questions, messages, conte
         }
       })
       
-      # Send first question
-      first_question <- survey$init()
-      shinychat::chat_append("chat", bot_response(first_question), session = session)
+      # Send welcome message first
+      welcome_message <- survey$init()
+      shinychat::chat_append("chat", bot_response(
+        welcome_message,
+        response_delay = config$response_delay,
+        character_delay = config$character_delay,
+        delay_variance = config$delay_variance
+      ), session = session)
+      
+      # Send first question as separate message after delay
+      first_question <- survey$get_first_question()
+      later::later(function() {
+        shinychat::chat_append("chat", bot_response(
+          first_question,
+          response_delay = config$response_delay,
+          character_delay = config$character_delay,
+          delay_variance = config$delay_variance
+        ), session = session)
+      }, delay = 1.5)
     }
   })
   
@@ -776,12 +804,22 @@ chat_survey <- function(input, output, session, chat, questions, messages, conte
     if (!is.null(result$message)) {
       if (result$complete) {
         # Survey finished
-        shinychat::chat_append("chat", bot_response(result$message), session = session)
+        shinychat::chat_append("chat", bot_response(
+          result$message,
+          response_delay = config$response_delay,
+          character_delay = config$character_delay,
+          delay_variance = config$delay_variance
+        ), session = session)
         survey$cleanup()
         survey <<- NULL
       } else {
         # Continue with next question or retry
-        shinychat::chat_append("chat", bot_response(result$message), session = session)
+        shinychat::chat_append("chat", bot_response(
+          result$message,
+          response_delay = config$response_delay,
+          character_delay = config$character_delay,
+          delay_variance = config$delay_variance
+        ), session = session)
       }
     }
   })
